@@ -8,6 +8,9 @@ INC=\
 CC=gcc
 CFLAGS += $(INC) -Werror -ggdb
 
+.IGNORE: clean
+.PHONY: clean
+
 arfcn2dl: arfcn2dl.c gsm-band.c
 	$(CC) $(CFLAGS) $^ -o $@
 

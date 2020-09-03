@@ -1,0 +1,10 @@
+#!/bin/bash
+
+if [ ! -d bin ]; then
+    mkdir bin
+fi
+
+for x in $@; do
+    make $x
+    cp $x bin
+done
