@@ -168,14 +168,6 @@ def process_dir(dirname):
     data = list()
     for f in files:
         path = os.path.join(dirname, f)
-        data.append(process_file(path))
-    return data
-
-def process_dir2(dirname):
-    files = os.listdir(dirname)
-    data = list()
-    for f in files:
-        path = os.path.join(dirname, f)
         s = Scan(path)
         data.append(s)
     return data
@@ -185,14 +177,14 @@ if __name__ == '__main__':
     st = os.stat(path)
 
     if stat.S_ISDIR(st.st_mode):
-        #data = process_dir(path)
-        data = process_dir2(path)
+        data = process_dir(path)
     elif stat.S_ISREG(st.st_mode):
-        data = [process_file(path)]
+        data = [Scan(path)]
     else:
         raise ValueError('Invalid input: %s', path)
 
     fig, ax = plt.subplots(nrows=len(data))
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
 
     if len(data) == 1:
         ax = [ax]
