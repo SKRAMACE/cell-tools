@@ -8,7 +8,7 @@ INC=\
 CC=gcc
 CFLAGS += $(INC) -Werror -ggdb
 
-arfcn2freq: arfcn2freq.c gsm-band.c
+arfcn2dl: arfcn2dl.c gsm-band.c
 	$(CC) $(CFLAGS) $^ -o $@
 
 earfcn2ul: earfcn2ul.c lte-band.c
@@ -22,3 +22,7 @@ fft-scan: fft-scan.c lte-band.c
 
 lte-info: lte-info.c lte-band.c
 	$(CC) $(CFLAGS) $^ -o $@
+
+clean:
+	rm -f *.obj
+	rm -f arfcn2dl earfcn2ul earfcn2dl fft-scan lte-info
