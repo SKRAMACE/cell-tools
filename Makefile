@@ -21,7 +21,7 @@ earfcn2dl: earfcn2dl.c lte-band.c
 	$(CC) $(CFLAGS) $^ -o $@
 
 fft-scan: fft-scan.c lte-band.c
-	$(CC) $(CFLAGS) $^ -o $@ -lbingewatch -lSoapySDR -lpthread -lradpool -lliquid -lfftw3f -lm
+	$(CC) $(CFLAGS) $^ -o $@ -lbingewatch -lSoapySDR -lpthread -lmemex -lliquid -lfftw3f -lm
 
 lte-info: lte-info.c lte-band.c
 	$(CC) $(CFLAGS) $^ -o $@
