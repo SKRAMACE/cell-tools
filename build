@@ -1,10 +1,39 @@
 #!/bin/bash
 
+BUILD_ALL=0
+
+PROGS=(\
+    arfcn2dl \
+    earfcn2ul \
+    earfcn2dl \
+    fft-scan \
+    lte-info \
+)
+
+function build_progs(){
+    for x in ${@}; do
+        make $x
+        cp $x bin
+    done
+}
+
+for arg in "$@"; do
+    shift
+    case "$arg" in
+    --all)
+        BUILD_ALL=1
+        ;;
+    *)
+        set -- "$@" "$arg"
+    esac
+done
+
 if [ ! -d bin ]; then
     mkdir bin
 fi
 
-for x in $@; do
-    make $x
-    cp $x bin
-done
+if [ $BUILD_ALL == 0 ]; then
+    build_progs ${@}
+else
+    build_progs ${PROGS[@]}
+fi
