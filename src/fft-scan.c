@@ -1,21 +1,19 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <string.h>
+#include <stdlib.h>
 #include <complex.h>
-#include <sys/stat.h>
 #include <liquid/liquid.h>
+#include <semaphore.h>
 
-#define LOGEX_MAIN
+#define LOGEX_STD
 #include <logex.h>
 #include <envex.h>
-#include <memex.h>
 
 #include <bingewatch/sdrs.h>
 #include <bingewatch/simple-buffers.h>
 
-#include "lte-band.h"
+#include "fft-scan.h"
 
-#define MAX_RATE (double)30720000
+//#define MAX_RATE (double)30720000
+#define MAX_RATE (double)20000000
 
 static struct fft_res_s {
     uint32_t len;
@@ -32,33 +30,30 @@ static struct fft_res_s {
     {0,0}
 };
 
-struct scan_plan_t {
-    POOL *pool; 
-    uint32_t fftlen;
-    uint32_t fftuse;
-
-    double band_start;
-    double band_end;
-    double bin_res;
-    double samp_rate;
-
-    float *full_scan;
-    size_t n_bins;
-};
-
 struct scan_rx_t {
     IO_HANDLE sdr;
     double freq;
     double samp_rate;
     double sec;
+    uint32_t dec;
+    uint32_t fftlen;
+    sem_t *thread_limit;
 };
 
 struct proc_rx_t {
     IO_HANDLE buf;
     uint32_t fftlen;
-    uint32_t dec;
     float *fft;
+    double freq;
+    sem_t *thread_limit;
 };
+
+static uint32_t
+calculate_step_bins(struct scan_plan_t *plan)
+{
+    uint32_t fft_half = plan->fftlen / 2;
+    return (plan->bin_dc == 0) ? 2 * ((plan->fftlen / 2) - plan->bin_bw) : fft_half - plan->bin_dc - plan->bin_bw;
+}
 
 static void
 fft_mirror(float complex *out, float complex *in, uint32_t fftlen)
@@ -68,7 +63,7 @@ fft_mirror(float complex *out, float complex *in, uint32_t fftlen)
     memcpy(out + (fftlen - hlen), in + 1, (hlen - 1) * sizeof(float complex));
 }
 
-static void
+void
 print_plan(struct scan_plan_t *plan)
 {
     printf("Scan Plan (%f-%f):\n", plan->band_start, plan->band_end);
@@ -76,27 +71,41 @@ print_plan(struct scan_plan_t *plan)
     printf("\tresolution: %f\n", plan->bin_res);
     printf("\t    fftlen: %d\n", plan->fftlen);
     printf("\t    fftuse: %d\n", plan->fftuse);
+    printf("\t    bin_bw: %d\n", plan->bin_bw);
+    printf("\t    bin_dc: %d\n", plan->bin_dc);
     printf("\n");
 }
 
-static void
+void
 print_rounds(struct scan_plan_t *plan)
 {
     printf("Scan Rounds:\n");
 
-    double half_band = plan->bin_res * (plan->fftuse / 2);
+    double fft_half = (double)(plan->fftlen / 2);
+    double half_band = plan->bin_res * fft_half;
+    double bw_band = (double)plan->bin_bw * plan->bin_res;
+    double dc_band = (double)plan->bin_dc * plan->bin_res;
+    double half_bin = (plan->bin_res / 2);
+    double f = plan->band_start + half_band - bw_band - half_bin;
+
+    uint32_t step_bins = calculate_step_bins(plan);
+    double step = (double)step_bins * plan->bin_res;
+
+    /*
     double center_off = (plan->bin_res / 2);
     double f = plan->band_start + half_band - center_off;
+    */
     int round = 0;
     while ((f - half_band) < plan->band_end) {
-        printf("  %2d: %f %f %f\n", round, f + center_off - half_band, f, f - center_off + half_band);
-        f += 2 * half_band;
+        printf("  %2d: %f %f %f\n",
+            round, f + half_bin - half_band, f, f - half_bin + half_band);
+        f += step;
         round++;
     }
     printf("\n");
 }
 
-static int
+int
 plan_scan(double f0, double f1, double resolution, struct scan_plan_t *plan)
 {
     memset(plan, 0, sizeof(struct scan_plan_t));
@@ -126,6 +135,8 @@ plan_scan(double f0, double f1, double resolution, struct scan_plan_t *plan)
         plan->fftlen = fr->len;
         plan->fftuse = fr->use;
         plan->samp_rate = (double)fr->len * resolution;
+        ENVEX_UINT32(plan->bin_bw, "FFT_SCAN_BIN_BW", (plan->fftlen - plan->fftuse) / 2);
+        ENVEX_UINT32(plan->bin_dc, "FFT_SCAN_BIN_DC", 1);
 
         if (!valid) {
             return 1;
@@ -140,25 +151,31 @@ scan_rx(void *vars)
 {
     struct scan_rx_t *scan = (struct scan_rx_t *)vars;
 
-    size_t n_samp = (size_t)(scan->sec * scan->samp_rate);
-    size_t total_bytes = n_samp * sizeof(float complex);
+    sem_wait(scan->thread_limit);
+    size_t total_samples = (size_t)(scan->sec * scan->samp_rate);
+
+    size_t fft_bytes = scan->fftlen * sizeof(float complex);
+    size_t read_bytes = scan->dec * scan->fftlen * sizeof(float complex);
+    uint8_t *read_buf = malloc(read_bytes);
 
     IO_HANDLE out;
-    size_t bufsize = total_bytes / 8;
-    const IOM *rbm = new_rb_machine(&out, total_bytes, bufsize);
+    const IOM *rbm = new_rb_machine(&out, fft_bytes * 8, fft_bytes);
 
     soapy_rx_set_freq(scan->sdr, scan->freq);
 
-    size_t remaining = total_bytes;
-    float complex *buf = (float complex *)malloc(bufsize);
+    size_t remaining = total_samples * sizeof(float complex);
     while (remaining) {
-        size_t bytes = (remaining > bufsize) ? bufsize : remaining;
-        soapy_rx_machine->read(scan->sdr, buf, &bytes);
+        size_t bytes = (read_bytes < remaining) ? read_bytes : remaining;
+        soapy_rx_machine->read(scan->sdr, read_buf, &bytes);
         remaining -= bytes;
-        rbm->write(out, buf, &bytes);
+
+        bytes = (bytes > fft_bytes) ? fft_bytes : bytes;
+        rbm->write(out, read_buf, &bytes);
     }
     printf("Freq %f: %zd bytes\n", scan->freq, rb_get_bytes(out));
-    free(buf);
+    free(read_buf);
+
+    sem_post(scan->thread_limit);
 
     IO_HANDLE *ret = malloc(sizeof(IO_HANDLE));
     *ret = out;
@@ -169,18 +186,18 @@ static void *
 scan_process(void *vars)
 {
     struct proc_rx_t *proc = (struct proc_rx_t *)vars;
+    sem_wait(proc->thread_limit);
+
     const IOM *rb = get_rb_machine();
 
     size_t fft_bytes = proc->fftlen * sizeof(float complex);
     float complex *fft_in = malloc(fft_bytes);
     float complex *fft_out = malloc(fft_bytes);
-
-    size_t fft_skip_bytes = (proc->dec - 1) * proc->fftlen;
-    uint8_t *fft_skip = malloc(fft_skip_bytes);
+    uint8_t *fft_temp = malloc(fft_bytes);
 
     fftplan fft = fft_create_plan(proc->fftlen, fft_in, fft_out, LIQUID_FFT_FORWARD, 0);
 
-    size_t n_samp = (size_t)(rb_get_bytes(proc->buf) / (proc->fftlen * proc->dec));
+    size_t n_samp = (size_t)(rb_get_bytes(proc->buf) / proc->fftlen);
     size_t total_samples = 0;
     printf("%zd\n", n_samp);
     while (rb_get_bytes(proc->buf) > 0) {
@@ -191,7 +208,7 @@ scan_process(void *vars)
         }
 
         fft_execute(fft);
-        float complex *f = (float complex *)fft_skip;
+        float complex *f = (float complex *)fft_temp;
         fft_mirror(f, fft_out, proc->fftlen);
 
         for (int i = 0; i < proc->fftlen; i++) {
@@ -204,35 +221,24 @@ scan_process(void *vars)
             proc->fft[i] += cabsf(f[i]) / (float)n_samp;
         }
         total_samples++;
-
-        bytes = fft_skip_bytes;
-        rb->read(proc->buf, fft_skip, &bytes);
     }
 
     rb->destroy(proc->buf);
     fft_destroy_plan(fft);
     free(fft_in);
     free(fft_out);
-    free(fft_skip);
+    free(fft_temp);
 
+    sem_post(proc->thread_limit);
     void *ret = NULL;
     pthread_exit(ret);
 }
 
-static void
+void
 execute_plan(struct scan_plan_t *plan)
 {
     // Allocate memory for RX struct
     struct scan_rx_t *scan = (struct scan_rx_t *)palloc(plan->pool, sizeof(struct scan_rx_t));
-
-    // Calculate number of RX rounds
-    float rounds_f = (plan->band_end - plan->band_start) / (plan->bin_res * plan->fftuse);
-    float rounds_dec = rounds_f - (float)(int)rounds_f;
-    int n_rounds = (rounds_dec == 0) ? (int)rounds_f : (int)rounds_f + 1;
-
-    // Allocate memory for workers
-    pthread_t *workers = (pthread_t *)palloc(plan->pool, n_rounds * sizeof(pthread_t));
-    struct proc_rx_t *process = (struct proc_rx_t *)palloc(plan->pool, n_rounds * sizeof(struct proc_rx_t));
 
     // Create SDR IOM
     IO_HANDLE lime = new_soapy_rx_machine("lime");
@@ -247,18 +253,40 @@ execute_plan(struct scan_plan_t *plan)
     ENVEX_FLOAT(pga, "LIME_RX_GAIN_PGA", 0.0);
     soapy_set_gains(lime, lna, tia, pga);
     soapy_rx_set_samp_rate(lime, plan->samp_rate);
+    soapy_rx_set_bandwidth(lime, plan->samp_rate);
 
     scan->sdr = lime;
     scan->samp_rate = plan->samp_rate;
-
+    scan->fftlen = plan->fftlen;
     double total_seconds;
     ENVEX_DOUBLE(total_seconds, "FFT_SCAN_SAMPLE_TIME", 1);
     scan->sec = total_seconds;
+    ENVEX_UINT32(scan->dec, "FFT_SCAN_SAMPLE_DECIMATE", 10);
 
     // Init loop
-    double half_band = plan->bin_res * (plan->fftuse / 2);
-    double center_off = (plan->bin_res / 2);
-    double f = plan->band_start + half_band - center_off;
+    double fft_half = (double)(plan->fftlen / 2);
+    double half_band = plan->bin_res * fft_half;
+    double bw_band = (double)plan->bin_bw * plan->bin_res;
+    double dc_band = (double)plan->bin_dc * plan->bin_res;
+    double half_bin = (plan->bin_res / 2);
+    double f = plan->band_start + half_band - bw_band - half_bin;
+
+    uint32_t step_bins = calculate_step_bins(plan);
+    double step = (double)step_bins * plan->bin_res;
+
+    // Calculate number of RX rounds
+    float rounds_f = (plan->band_end - plan->band_start) / step;
+    float rounds_dec = rounds_f - (float)(int)rounds_f;
+    int n_rounds = (rounds_dec == 0) ? (int)rounds_f : (int)rounds_f + 1;
+
+    // Allocate memory for workers
+    pthread_t *workers = (pthread_t *)palloc(plan->pool, n_rounds * sizeof(pthread_t));
+    struct proc_rx_t *process = (struct proc_rx_t *)palloc(plan->pool, n_rounds * sizeof(struct proc_rx_t));
+
+    sem_t thread_limit;
+    sem_init(&thread_limit, 0, 4);
+    scan->thread_limit = &thread_limit;
+
     int r = 0;
     for (; r < n_rounds; r++) {
         scan->freq = f;
@@ -269,13 +297,14 @@ execute_plan(struct scan_plan_t *plan)
         IO_HANDLE *h;
         pthread_join(rx, (void **)&h);
 
-        ENVEX_UINT32(process[r].dec, "FFT_SCAN_SAMPLE_DECIMATE", 10);
         process[r].fftlen = plan->fftlen;
         process[r].buf = *h;
+        process[r].freq = f;
         process[r].fft = pcalloc(plan->pool, plan->fftlen * sizeof(float));
+        process[r].thread_limit = &thread_limit;
         pthread_create(&workers[r], NULL, scan_process, (void *)&process[r]);
 
-        f += 2 * half_band;
+        f += step;
     }
 
     for (int r = 0; r < n_rounds; r++) {
@@ -283,9 +312,44 @@ execute_plan(struct scan_plan_t *plan)
     }
 
     // Allocate enough memory for all fft bins
-    size_t bin_bytes = n_rounds * plan->fftlen * sizeof(float);
-    float *bins = (float *)malloc(bin_bytes);
+    size_t bin_samples = ((plan->band_end - plan->band_start) / plan->bin_res) + 1;
+    //size_t bin_samples = n_rounds * plan->fftlen;
 
+    float *bins = (float *)calloc(bin_samples, sizeof(float));
+    uint32_t *count = (uint32_t *)calloc(bin_samples, sizeof(uint32_t));
+
+    size_t total_bins = 0;
+    uint32_t b = 0;
+    for (int r = 0; r < n_rounds; r++) {
+        for (int off = plan->bin_bw; off < (plan->fftlen / 2) - plan->bin_dc; off++) {
+            uint32_t bl = b + off - plan->bin_bw;
+            uint32_t br = b + plan->fftlen - 1 - off - plan->bin_bw;
+
+            if (bl < bin_samples) {
+                bins[bl] += process[r].fft[off];
+                count[bl]++;
+            }
+
+            if (br < bin_samples) {
+                bins[br] += process[r].fft[plan->fftlen - 1 - off];
+                count[br]++;
+            }
+        }
+        b += step_bins;
+    }
+
+    b = 0;
+    f = plan->band_start;
+    for (; b < bin_samples; b++) {
+        if (count[b] == 0) {
+            break;
+        }
+        f += plan->bin_res;
+        bins[b] = (count[b]) ? bins[b] / (float)count[b] : 0;
+    }
+    printf("%f\n", f);
+
+    /*
     size_t total_bins = 0;
     for (int r = 0; r < n_rounds; r++) {
         size_t offset = (plan->fftlen - plan->fftuse) / 2;
@@ -297,62 +361,10 @@ execute_plan(struct scan_plan_t *plan)
         memcpy(bins + total_bins, fft, bytes);
         total_bins += n_bins;
     }
+    */
+
+    free(count);
 
     plan->full_scan = bins;
-    plan->n_bins = total_bins;
-}
-
-int
-main(int argc, void *argv[])
-{
-    if (!ENVEX_EXISTS("FFT_SCAN_BAND")) {
-        printf("ERROR: Missing environment variable \"FFT_SCAN_BAND\"\n");
-        exit(1);
-    }
-
-    char *outdir;
-    ENVEX_TOSTR(outdir, "FFT_SCAN_OUTDIR", "/tmp");
-    struct stat s;
-    if (stat(outdir, &s) != 0) {
-        printf("ERROR: Output directory \"%s\" not found\n", outdir);
-        exit(1);
-    }
-
-    if (!S_ISDIR(s.st_mode)) {
-        printf("ERROR: \"%s\" is not a directory\n", outdir);
-        exit(1);
-    }
-
-    uint32_t b;
-    ENVEX_UINT32(b, "FFT_SCAN_BAND", 0);
-
-    struct lte_band_t band;
-    if (get_lte_band(b, &band) != 0) {
-        printf("ERROR: Unsupported band (%d)\n", b);
-        exit(1);
-    }
-
-    double bandwidth = band.dl_hi - band.dl_lo;
-    double res;
-    ENVEX_DOUBLE(res, "FFT_SCAN_RESOLUTION", bandwidth/10000);
-
-    struct scan_plan_t plan;
-    if (plan_scan(band.dl_lo, band.dl_hi, res, &plan) != 0) {
-        printf("ERROR: Bin resolultion of %f results in impossible sample rate (%f)\n",
-            plan.bin_res, plan.samp_rate);
-        exit(1);
-    }
-
-    print_plan(&plan);
-    print_rounds(&plan);
-
-    execute_plan(&plan);
-
-    char fname[1024];
-    snprintf(fname, 1024, "%s/fftscan-band%d-binres%.0f.float", outdir, band.band, plan.bin_res);
-    FILE *f = fopen(fname, "w");
-    fwrite(plan.full_scan, sizeof(float), plan.n_bins, f);
-    fclose(f);
-
-    pool_cleanup();
+    plan->n_bins = bin_samples;
 }
