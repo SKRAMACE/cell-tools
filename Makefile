@@ -20,7 +20,10 @@ earfcn2ul: earfcn2ul.c lte-band.c
 earfcn2dl: earfcn2dl.c lte-band.c
 	$(CC) $(CFLAGS) $^ -o $@
 
-fft-scan: fft-scan.c lte-band.c
+fft-scan-band: fft-scan-band.c fft-scan.c lte-band.c
+	$(CC) $(CFLAGS) $^ -o $@ -lbingewatch -lSoapySDR -lpthread -lmemex -lliquid -lfftw3f -lm
+
+fft-scan-freq: fft-scan-freq.c fft-scan.c
 	$(CC) $(CFLAGS) $^ -o $@ -lbingewatch -lSoapySDR -lpthread -lmemex -lliquid -lfftw3f -lm
 
 lte-info: lte-info.c lte-band.c
@@ -28,4 +31,4 @@ lte-info: lte-info.c lte-band.c
 
 clean:
 	rm -f *.obj
-	rm -f arfcn2dl earfcn2ul earfcn2dl fft-scan lte-info
+	rm -f arfcn2dl earfcn2ul earfcn2dl fft-scan-band fft-scan-freq lte-info

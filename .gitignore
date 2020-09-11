@@ -2,6 +2,7 @@ arfcn2dl
 earfcn2dl
 earfcn2freq
 earfcn2ul
-fft-scan
+fft-scan-freq
+fft-scan-band
 lte-info
 bin/
