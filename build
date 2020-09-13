@@ -6,7 +6,8 @@ PROGS=(\
     arfcn2dl \
     earfcn2ul \
     earfcn2dl \
-    fft-scan \
+    fft-scan-band \
+    fft-scan-freq \
     lte-info \
 )
 
