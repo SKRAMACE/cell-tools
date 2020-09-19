@@ -61,9 +61,18 @@ main(int argc, void *argv[])
 
     execute_plan(&plan);
 
+    char tag[1024];
+    if (ENVEX_EXISTS("FFT_SCAN_TAG")) {
+        char *t;
+        ENVEX_TOSTR(t, "FFT_SCAN_TAG", "");
+        snprintf(tag, 1023, "fftscan-%s", t);
+    } else {
+        snprintf(tag, 1023, "fftscan");
+    }
+
     char fname[1024];
-    snprintf(fname, 1024, "%s/fftscan-freq%.0f-bw%.0f-binres%.0f.float",
-        outdir, plan.band_start, plan.band_end - plan.band_start, plan.bin_res);
+    snprintf(fname, 1024, "%s/%s-freq%.0f-bw%.0f-binres%.0f.float",
+        outdir, tag, plan.band_start, plan.band_end - plan.band_start, plan.bin_res);
     FILE *f = fopen(fname, "w");
     fwrite(plan.full_scan, sizeof(float), plan.n_bins, f);
     fclose(f);
