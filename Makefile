@@ -34,4 +34,4 @@ lte-info: lte-info.c lte-band.c
 
 clean:
 	rm -f *.obj
-	rm -f arfcn2dl earfcn2ul earfcn2dl fft-scan-band fft-scan-freq lte-info
+	rm -f arfcn2dl earfcn2ul earfcn2dl earfcn2band fft-scan-band fft-scan-freq lte-info
