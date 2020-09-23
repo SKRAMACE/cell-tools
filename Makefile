@@ -17,6 +17,9 @@ arfcn2dl: arfcn2dl.c gsm-band.c
 earfcn2ul: earfcn2ul.c lte-band.c
 	$(CC) $(CFLAGS) $^ -o $@
 
+earfcn2band: earfcn2band.c lte-band.c
+	$(CC) $(CFLAGS) $^ -o $@
+
 earfcn2dl: earfcn2dl.c lte-band.c
 	$(CC) $(CFLAGS) $^ -o $@
 
