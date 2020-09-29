@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <cell-tools.h>
 
-#define LTE_EARFCN_STEP 100*KHZ
+#define LTE_EARFCN_STEP (100*KHZ)
 
 enum lte_3gpp_release_e {
     LTE_3GPP_REL_8,
@@ -45,5 +45,7 @@ int band_earfcn_to_ul(uint32_t band, uint32_t earfcn, double *freq);
 int earfcn_to_dl(uint32_t earfcn, double *freq);
 int earfcn_to_ul(uint32_t earfcn, double *freq);
 int earfcn_to_band(uint32_t earfcn);
+uint32_t dl_to_band(double freq, struct lte_band_t **band);
+uint32_t ul_to_band(double freq, struct lte_band_t **band);
 
 #endif

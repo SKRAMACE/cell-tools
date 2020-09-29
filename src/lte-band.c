@@ -27,6 +27,19 @@ static struct lte_band_t lte_band[] = {
     { 0,        0.0,        0.0,     0,     0,     0.0 ,    "NULL", LTE_3GPP_EOL},
 };
 
+static uint32_t
+get_n_bands()
+{
+    struct lte_band_t *b = lte_band;
+    uint32_t n = 0;
+
+    while (b->band != 0) {
+        n++;
+        b++;
+    }
+    return n;
+}
+
 static void
 print_csv_titles()
 {
@@ -67,6 +80,77 @@ get_lte_band(uint32_t band_number, struct lte_band_t *band)
     }
 
     return 1;
+}
+
+uint32_t
+dl_to_band(double freq, struct lte_band_t **band)
+{
+    struct lte_band_t *ret = malloc(get_n_bands() * sizeof(struct lte_band_t));
+    uint32_t n = 0;
+
+    struct lte_band_t *b = lte_band;
+    while (b->band != 0) {
+        if (freq < b->dl_lo) {
+            goto next;
+        }
+
+        if (freq >= b->dl_hi) {
+            goto next;
+        }
+
+        memcpy(ret + n, b, sizeof(struct lte_band_t));
+        n++;
+
+    next:
+        b++;
+    }
+
+    if (n == 0) {
+        free(ret);
+        ret = NULL;
+    }
+
+    *band = ret;
+    return n;
+}
+
+uint32_t
+ul_to_band(double freq, struct lte_band_t **band)
+{
+    struct lte_band_t *ret = malloc(get_n_bands() * sizeof(struct lte_band_t));
+    uint32_t n = 0;
+
+    struct lte_band_t *b = lte_band;
+    while (b->band != 0) {
+        // Handle no-uplink case
+        if (b->offset == 0) {
+            goto next;
+        }
+
+        double ul_lo = b->dl_lo - b->offset;
+        double ul_hi = b->dl_hi - b->offset;
+        if (freq < ul_lo) {
+            goto next;
+        }
+
+        if (freq >= ul_hi) {
+            goto next;
+        }
+
+        memcpy(ret + n, b, sizeof(struct lte_band_t));
+        n++;
+
+    next:
+        b++;
+    }
+
+    if (n == 0) {
+        free(ret);
+        ret = NULL;
+    }
+
+    *band = ret;
+    return n;
 }
 
 int
