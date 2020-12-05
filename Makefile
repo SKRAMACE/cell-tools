@@ -8,6 +8,11 @@ INC=\
 CC=gcc
 CFLAGS += $(INC) -Werror -ggdb
 
+BINGEWATCH=\
+    -lbingewatch_soapy \
+    -lbingewatch \
+    -lSoapySDR \
+
 .IGNORE: clean
 .PHONY: clean
 
@@ -27,10 +32,10 @@ freq2earfcn: freq2earfcn.c lte-band.c
 	$(CC) $(CFLAGS) $^ -o $@
 
 fft-scan-band: fft-scan-band.c fft-scan.c lte-band.c
-	$(CC) $(CFLAGS) $^ -o $@ -lbingewatch -lSoapySDR -lpthread -lmemex -lliquid -lfftw3f -lm
+	$(CC) $(CFLAGS) $^ -o $@ $(BINGEWATCH) -lpthread -lmemex -lliquid -lfftw3f -lm
 
 fft-scan-freq: fft-scan-freq.c fft-scan.c
-	$(CC) $(CFLAGS) $^ -o $@ -lbingewatch -lSoapySDR -lpthread -lmemex -lliquid -lfftw3f -lm
+	$(CC) $(CFLAGS) $^ -o $@ $(BINGEWATCH) -lSoapySDR -lpthread -lmemex -lliquid -lfftw3f -lm
 
 lte-info: lte-info.c lte-band.c
 	$(CC) $(CFLAGS) $^ -o $@
