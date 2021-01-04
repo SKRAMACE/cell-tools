@@ -158,8 +158,7 @@ scan_rx(void *vars)
     size_t read_bytes = scan->dec * scan->fftlen * sizeof(float complex);
     uint8_t *read_buf = malloc(read_bytes);
 
-    IO_HANDLE out;
-    const IOM *rbm = new_rb_machine(&out, fft_bytes * 8, fft_bytes);
+    IO_HANDLE out  = new_rb_machine();
 
     soapy_rx_set_freq(scan->sdr, scan->freq);
 
@@ -170,9 +169,9 @@ scan_rx(void *vars)
         remaining -= bytes;
 
         bytes = (bytes > fft_bytes) ? fft_bytes : bytes;
-        rbm->write(out, read_buf, &bytes);
+        ring_buffer_machine->write(out, read_buf, &bytes);
     }
-    printf("Freq %f: %zd bytes\n", scan->freq, rb_get_bytes(out));
+    printf("Freq %f: %zd bytes\n", scan->freq, rb_get_size(out));
     free(read_buf);
 
     sem_post(scan->thread_limit);
@@ -197,10 +196,10 @@ scan_process(void *vars)
 
     fftplan fft = fft_create_plan(proc->fftlen, fft_in, fft_out, LIQUID_FFT_FORWARD, 0);
 
-    size_t n_samp = (size_t)(rb_get_bytes(proc->buf) / proc->fftlen);
+    size_t n_samp = (size_t)(rb_get_size(proc->buf) / proc->fftlen);
     size_t total_samples = 0;
     printf("%zd\n", n_samp);
-    while (rb_get_bytes(proc->buf) > 0) {
+    while (rb_get_size(proc->buf) > 0) {
         size_t bytes = fft_bytes;
         rb->read(proc->buf, fft_in, &bytes);
         if (bytes < fft_bytes) {
