@@ -160,16 +160,16 @@ scan_rx(void *vars)
 
     IO_HANDLE out  = new_rb_machine();
 
-    soapy_rx_set_freq(scan->sdr, scan->freq);
+    lime_rx_set_freq(scan->sdr, scan->freq);
 
     size_t remaining = total_samples * sizeof(float complex);
     while (remaining) {
         size_t bytes = (read_bytes < remaining) ? read_bytes : remaining;
-        soapy_rx_machine->read(scan->sdr, read_buf, &bytes);
+        lime_rx_machine->read(scan->sdr, read_buf, &bytes);
         remaining -= bytes;
 
         bytes = (bytes > fft_bytes) ? fft_bytes : bytes;
-        ring_buffer_machine->write(out, read_buf, &bytes);
+        rb_machine->write(out, read_buf, &bytes);
     }
     printf("Freq %f: %zd bytes\n", scan->freq, rb_get_size(out));
     free(read_buf);
@@ -240,7 +240,7 @@ execute_plan(struct scan_plan_t *plan)
     struct scan_rx_t *scan = (struct scan_rx_t *)palloc(plan->pool, sizeof(struct scan_rx_t));
 
     // Create SDR IOM
-    IO_HANDLE lime = new_soapy_rx_machine("lime");
+    IO_HANDLE lime = new_lime_rx_machine();
     if (!lime) {
         error("LimeSDR not found");
         return;
@@ -250,9 +250,9 @@ execute_plan(struct scan_plan_t *plan)
     ENVEX_FLOAT(lna, "LIME_RX_GAIN_LNA", 0.0);
     ENVEX_FLOAT(tia, "LIME_RX_GAIN_TIA", 0.0);
     ENVEX_FLOAT(pga, "LIME_RX_GAIN_PGA", 0.0);
-    soapy_set_gains(lime, lna, tia, pga);
-    soapy_rx_set_samp_rate(lime, plan->samp_rate);
-    soapy_rx_set_bandwidth(lime, plan->samp_rate);
+    lime_set_gains(lime, lna, tia, pga);
+    lime_rx_set_samp_rate(lime, plan->samp_rate);
+    lime_rx_set_bandwidth(lime, plan->samp_rate);
 
     scan->sdr = lime;
     scan->samp_rate = plan->samp_rate;
