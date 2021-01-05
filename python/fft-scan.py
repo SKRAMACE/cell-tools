@@ -60,7 +60,14 @@ def to_mhz(x):
 
 class BandInfo(object):
     def __init__(self, band):
-        with open('conf/lte-band.csv') as csvfile:
+        conf = os.environ.get('LTE_BAND_CONF', 'conf/lte-band.csv')
+
+        try:
+            os.stat(conf)
+        except OSError as e:
+            raise Exception('ERROR: Band configuration file (LTE_BAND_CONF) not found: %s', conf)
+
+        with open(conf) as csvfile:
             reader = csv.DictReader(csvfile)
             band_list = filter(lambda row: row['band'] == band, reader)
 
@@ -144,6 +151,11 @@ def process_dir(dirname):
     data = list()
     for f in files:
         path = os.path.join(dirname, f)
+
+        st = os.stat(path)
+        if stat.S_ISDIR(st.st_mode):
+            continue
+
         s = Scan(path)
         data.append(s)
     return data
