@@ -3,6 +3,7 @@
 #include <liquid/liquid.h>
 #include <semaphore.h>
 
+#define LOGEX_TAG "FFTSCAN"
 #define LOGEX_STD
 #include <logex.h>
 #include <envex.h>
@@ -11,6 +12,12 @@
 #include <bingewatch/simple-buffers.h>
 
 #include "fft-scan.h"
+
+#define ASSERT_ENV(x,r)\
+    if (!ENVEX_EXISTS(x)) {\
+        error("Missing environment variable \"%s\"", x);\
+        return r;\
+    }
 
 //#define MAX_RATE (double)30720000
 #define MAX_RATE (double)20000000
@@ -38,6 +45,9 @@ struct scan_rx_t {
     uint32_t dec;
     uint32_t fftlen;
     sem_t *thread_limit;
+
+    int (*set_freq)(int, double);
+    int (*read)(int, void*, size_t*);
 };
 
 struct proc_rx_t {
@@ -160,12 +170,12 @@ scan_rx(void *vars)
 
     IO_HANDLE out  = new_rb_machine();
 
-    lime_rx_set_freq(scan->sdr, scan->freq);
+    scan->set_freq(scan->sdr, scan->freq);
 
     size_t remaining = total_samples * sizeof(float complex);
     while (remaining) {
         size_t bytes = (read_bytes < remaining) ? read_bytes : remaining;
-        lime_rx_machine->read(scan->sdr, read_buf, &bytes);
+        scan->read(scan->sdr, read_buf, &bytes);
         remaining -= bytes;
 
         bytes = (bytes > fft_bytes) ? fft_bytes : bytes;
@@ -233,30 +243,76 @@ scan_process(void *vars)
     pthread_exit(ret);
 }
 
+static void
+b210_setup(struct scan_rx_t *scan)
+{
+    IO_HANDLE b210 =
+        new_b210_rx_machine_devstr("recv_frame_size=2056,num_recv_frames=2038");
+
+    float lna;
+    ENVEX_FLOAT(lna, "FFT_SCAN_GAIN_LNA", 0.0);
+    b210_rx_set_gain(b210, lna);
+
+    b210_rx_set_samp_rate(b210, scan->samp_rate);
+    b210_rx_set_bandwidth(b210, scan->samp_rate);
+
+    scan->set_freq = b210_rx_set_freq;
+    scan->read = b210_rx_machine->read;
+
+    scan->sdr = b210;
+}
+
+static void
+lime_setup(struct scan_rx_t *scan)
+{
+    IO_HANDLE lime = new_lime_rx_machine();
+
+    float lna, tia, pga;
+    ENVEX_FLOAT(lna, "FFT_SCAN_GAIN_LNA", 0.0);
+    ENVEX_FLOAT(tia, "FFT_SCAN_GAIN_TIA", 0.0);
+    ENVEX_FLOAT(pga, "FFT_SCAN_GAIN_PGA", 0.0);
+    lime_set_gains(lime, lna, tia, pga);
+
+    float freq, samp_rate, bw;
+    lime_rx_set_samp_rate(lime, scan->samp_rate);
+    lime_rx_set_bandwidth(lime, scan->samp_rate);
+
+    scan->set_freq = lime_rx_set_freq;
+    scan->read = lime_rx_machine->read;
+
+    scan->sdr = lime;
+}
+
+
 void
 execute_plan(struct scan_plan_t *plan)
 {
     // Allocate memory for RX struct
     struct scan_rx_t *scan = (struct scan_rx_t *)palloc(plan->pool, sizeof(struct scan_rx_t));
 
+    scan->samp_rate = plan->samp_rate;
+    scan->fftlen = plan->fftlen;
+
     // Create SDR IOM
-    IO_HANDLE lime = new_lime_rx_machine();
-    if (!lime) {
-        error("LimeSDR not found");
+    IO_HANDLE input = 0;
+    if (ENVEX_EXISTS("FFT_SCAN_B210_INPUT")) {
+        info("Input: file");
+        b210_setup(scan);
+
+    } else if (ENVEX_EXISTS("FFT_SCAN_LIME_INPUT")) {
+        info("Input: lime");
+        lime_setup(scan);
+
+    } else {
+        info("Default: lime");
+        lime_setup(scan);
+    }
+
+    if (scan->sdr == 0) {
+        error("Input setup failed");
         return;
     }
 
-    float lna, tia, pga;
-    ENVEX_FLOAT(lna, "LIME_RX_GAIN_LNA", 0.0);
-    ENVEX_FLOAT(tia, "LIME_RX_GAIN_TIA", 0.0);
-    ENVEX_FLOAT(pga, "LIME_RX_GAIN_PGA", 0.0);
-    lime_set_gains(lime, lna, tia, pga);
-    lime_rx_set_samp_rate(lime, plan->samp_rate);
-    lime_rx_set_bandwidth(lime, plan->samp_rate);
-
-    scan->sdr = lime;
-    scan->samp_rate = plan->samp_rate;
-    scan->fftlen = plan->fftlen;
     double total_seconds;
     ENVEX_DOUBLE(total_seconds, "FFT_SCAN_SAMPLE_TIME", 1);
     scan->sec = total_seconds;

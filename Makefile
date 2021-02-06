@@ -10,8 +10,10 @@ CFLAGS += $(INC) -Werror -ggdb
 
 BINGEWATCH=\
     -lbingewatch_soapy \
+    -lbingewatch_uhd \
     -lbingewatch \
     -lSoapySDR \
+    -luhd \
 
 .IGNORE: clean
 .PHONY: clean
