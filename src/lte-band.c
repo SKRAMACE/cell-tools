@@ -5,7 +5,7 @@
 #include "lte-band.h"
 
 static struct lte_band_t lte_band[] = {
-    { 1, 2100.0*MHZ, 2170.0*MHZ,    0,    599, 190*MHZ,     "2100", LTE_3GPP_REL_8},
+    { 1, 2110.0*MHZ, 2170.0*MHZ,    0,    599, 190*MHZ,     "2100", LTE_3GPP_REL_8},
     { 2, 1930.0*MHZ, 1990.0*MHZ,  600,   1199,  80*MHZ, "1900 PCS", LTE_3GPP_REL_8},
     { 3, 1805.0*MHZ, 1880.0*MHZ, 1200,   1949,  95*MHZ,    "1800+", LTE_3GPP_REL_8},
     { 4, 2110.0*MHZ, 2155.0*MHZ, 1950,   2399, 400*MHZ,    "AWS-1", LTE_3GPP_REL_8},
