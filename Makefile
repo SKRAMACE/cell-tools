@@ -12,7 +12,7 @@ BINGEWATCH=\
     -lbingewatch_soapy \
     -lbingewatch_uhd \
     -lbingewatch \
-    -lSoapySDR \
+	/usr/local/lib/libSoapySDR.so \
     -luhd \
 
 .IGNORE: clean
